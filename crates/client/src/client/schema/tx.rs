@@ -1,4 +1,3 @@
-use super::block::BlockHeightFragment;
 use crate::client::{
     schema::{
         schema,
@@ -10,6 +9,7 @@ use crate::client::{
         PageInfo,
         Tai64Timestamp,
         TransactionId,
+        U32,
         U64,
     },
     types::TransactionResponse,
@@ -179,7 +179,7 @@ pub struct SubmittedStatus {
 #[cynic(schema_path = "./assets/schema.sdl")]
 pub struct SuccessStatus {
     pub transaction_id: TransactionId,
-    pub block: BlockHeightFragment,
+    pub block_height: U32,
     pub time: Tai64Timestamp,
     pub program_state: Option<ProgramState>,
     pub receipts: Vec<Receipt>,
@@ -191,7 +191,7 @@ pub struct SuccessStatus {
 #[cynic(schema_path = "./assets/schema.sdl")]
 pub struct FailureStatus {
     pub transaction_id: TransactionId,
-    pub block: BlockHeightFragment,
+    pub block_height: U32,
     pub time: Tai64Timestamp,
     pub reason: String,
     pub program_state: Option<ProgramState>,
@@ -370,6 +370,7 @@ pub struct EstimatePredicates {
 pub struct DryRunArg {
     pub txs: Vec<HexString>,
     pub utxo_validation: Option<bool>,
+    pub gas_price: Option<U64>,
 }
 
 #[derive(cynic::QueryFragment, Clone, Debug)]
@@ -379,7 +380,7 @@ pub struct DryRunArg {
     variables = "DryRunArg"
 )]
 pub struct DryRun {
-    #[arguments(txs: $txs, utxoValidation: $utxo_validation)]
+    #[arguments(txs: $txs, utxoValidation: $utxo_validation, gasPrice: $gas_price)]
     pub dry_run: Vec<DryRunTransactionExecutionStatus>,
 }
 
@@ -467,7 +468,8 @@ pub mod tests {
         let tx = fuel_tx::Transaction::default_test_tx();
         let query = DryRun::build(DryRunArg {
             txs: vec![HexString(Bytes(tx.to_bytes()))],
-            utxo_validation: None,
+            utxo_validation: Some(true),
+            gas_price: Some(123u64.into()),
         });
         insta::assert_snapshot!(query.query)
     }

@@ -1,10 +1,14 @@
 use crate::{
-    database::Database,
-    service::adapters::{
-        BlockImporterAdapter,
-        ConsensusParametersProvider,
-        P2PAdapter,
-        StaticGasPrice,
+    database::OnChainIterableKeyValueView,
+    service::{
+        adapters::{
+            BlockImporterAdapter,
+            ConsensusParametersProvider,
+            P2PAdapter,
+            SharedMemoryPool,
+            StaticGasPrice,
+        },
+        vm_pool::MemoryFromPool,
     },
 };
 use fuel_core_services::stream::BoxStream;
@@ -21,6 +25,7 @@ use fuel_core_txpool::ports::{
     BlockImporter,
     ConsensusParametersProvider as ConsensusParametersProviderTrait,
     GasPriceProvider,
+    MemoryPool,
 };
 use fuel_core_types::{
     entities::{
@@ -33,7 +38,6 @@ use fuel_core_types::{
         UtxoId,
     },
     fuel_types::{
-        BlockHeight,
         ContractId,
         Nonce,
     },
@@ -44,6 +48,7 @@ use fuel_core_types::{
             GossipsubMessageInfo,
             TransactionGossipData,
         },
+        txpool::Result as TxPoolResult,
     },
 };
 use std::sync::Arc;
@@ -118,7 +123,7 @@ impl fuel_core_txpool::ports::PeerToPeer for P2PAdapter {
     }
 }
 
-impl fuel_core_txpool::ports::TxPoolDb for Database {
+impl fuel_core_txpool::ports::TxPoolDb for OnChainIterableKeyValueView {
     fn utxo(&self, utxo_id: &UtxoId) -> StorageResult<Option<CompressedCoin>> {
         self.storage::<Coins>()
             .get(utxo_id)
@@ -136,14 +141,24 @@ impl fuel_core_txpool::ports::TxPoolDb for Database {
     }
 }
 
+#[async_trait::async_trait]
 impl GasPriceProvider for StaticGasPrice {
-    fn gas_price(&self, _block_height: BlockHeight) -> Option<u64> {
-        Some(self.gas_price)
+    async fn last_gas_price(&self) -> TxPoolResult<u64> {
+        Ok(self.gas_price)
     }
 }
 
 impl ConsensusParametersProviderTrait for ConsensusParametersProvider {
     fn latest_consensus_parameters(&self) -> Arc<ConsensusParameters> {
         self.shared_state.latest_consensus_parameters()
+    }
+}
+
+#[async_trait::async_trait]
+impl MemoryPool for SharedMemoryPool {
+    type Memory = MemoryFromPool;
+
+    async fn get_memory(&self) -> Self::Memory {
+        self.memory_pool.take_raw().await
     }
 }

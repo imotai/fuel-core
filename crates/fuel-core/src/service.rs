@@ -2,7 +2,13 @@ use self::adapters::BlockImporterAdapter;
 use crate::{
     combined_database::CombinedDatabase,
     database::Database,
-    service::adapters::PoAAdapter,
+    service::{
+        adapters::{
+            ExecutorAdapter,
+            PoAAdapter,
+        },
+        sub_services::TxPoolSharedState,
+    },
 };
 use fuel_core_poa::ports::BlockImporter;
 use fuel_core_services::{
@@ -12,10 +18,12 @@ use fuel_core_services::{
     State,
     StateWatcher,
 };
-use fuel_core_storage::IsNotFound;
+use fuel_core_storage::{
+    transactional::AtomicView,
+    IsNotFound,
+};
 use std::net::SocketAddr;
 
-use crate::service::sub_services::TxPoolSharedState;
 pub use config::{
     Config,
     DbType,
@@ -30,6 +38,7 @@ pub mod genesis;
 pub mod metrics;
 mod query;
 pub mod sub_services;
+pub mod vm_pool;
 
 #[derive(Clone)]
 pub struct SharedState {
@@ -53,6 +62,8 @@ pub struct SharedState {
     pub database: CombinedDatabase,
     /// Subscribe to new block production.
     pub block_importer: BlockImporterAdapter,
+    /// The executor to validate blocks.
+    pub executor: ExecutorAdapter,
     /// The config of the service.
     pub config: Config,
 }
@@ -68,6 +79,12 @@ pub struct FuelService {
     pub shared: SharedState,
     /// The address bound by the system for serving the API
     pub bound_address: SocketAddr,
+}
+
+impl Drop for FuelService {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 impl FuelService {
@@ -222,7 +239,7 @@ impl RunnableService for Task {
         _: Self::TaskParams,
     ) -> anyhow::Result<Self::Task> {
         // check if chain is initialized
-        if let Err(err) = self.shared.database.on_chain().get_genesis() {
+        if let Err(err) = self.shared.database.on_chain().latest_view()?.get_genesis() {
             if err.is_not_found() {
                 let result = genesis::execute_genesis_block(
                     watcher.clone(),
@@ -318,9 +335,9 @@ mod tests {
             i += 1;
         }
 
-        // current services: graphql, graphql worker, txpool, PoA
+        // current services: graphql, graphql worker, txpool, PoA, gas price service
         #[allow(unused_mut)]
-        let mut expected_services = 5;
+        let mut expected_services = 6;
 
         // Relayer service is disabled with `Config::local_node`.
         // #[cfg(feature = "relayer")]

@@ -10,6 +10,7 @@ use criterion::{
 };
 use fuel_core::service::config::Trigger;
 use fuel_core_benches::*;
+use fuel_core_storage::transactional::AtomicView;
 use fuel_core_types::{
     fuel_asm::{
         op,
@@ -31,9 +32,12 @@ use fuel_core_types::{
         Immediate12,
         Immediate18,
     },
-    fuel_vm::checked_transaction::{
-        CheckPredicateParams,
-        EstimatePredicates,
+    fuel_vm::{
+        checked_transaction::{
+            CheckPredicateParams,
+            EstimatePredicates,
+        },
+        interpreter::MemoryInstance,
     },
 };
 use rand::{
@@ -113,6 +117,8 @@ where
                                 .shared
                                 .database
                                 .on_chain()
+                                .latest_view()
+                                .unwrap()
                                 .get_sealed_block_by_height(&1.into())
                                 .unwrap()
                                 .unwrap();
@@ -209,7 +215,7 @@ fn predicate_transfers(c: &mut Criterion) {
             .add_output(Output::coin(rng.gen(), 50, AssetId::default()))
             .add_output(Output::change(rng.gen(), 0, AssetId::default()))
             .finalize();
-        tx.estimate_predicates(&CheckPredicateParams::default())
+        tx.estimate_predicates(&CheckPredicateParams::default(), MemoryInstance::new())
             .expect("Predicate check failed");
         tx
     };
@@ -275,7 +281,7 @@ fn predicate_transfers_eck1(c: &mut Criterion) {
             .add_output(Output::coin(rng.gen(), 50, AssetId::default()))
             .add_output(Output::change(rng.gen(), 0, AssetId::default()))
             .finalize();
-        tx.estimate_predicates(&CheckPredicateParams::default())
+        tx.estimate_predicates(&CheckPredicateParams::default(), MemoryInstance::new())
             .expect("Predicate check failed");
         tx
     };

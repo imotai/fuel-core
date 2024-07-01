@@ -20,18 +20,26 @@ use crate::{
 use fuel_core_chain_config::{
     AddTable,
     ChainConfig,
+    LastBlockConfig,
     SnapshotFragment,
     SnapshotMetadata,
     SnapshotWriter,
     StateConfigBuilder,
     TableEntry,
 };
+use fuel_core_poa::ports::Database as DatabaseTrait;
 use fuel_core_storage::{
-    blueprint::BlueprintInspect,
-    iter::IterDirection,
+    iter::{
+        IterDirection,
+        IterableTable,
+    },
     kv_store::StorageColumn,
     structured_storage::TableWithBlueprint,
     tables::{
+        merkle::{
+            FuelBlockMerkleData,
+            FuelBlockMerkleMetadata,
+        },
         Coins,
         ContractsAssets,
         ContractsLatestUtxo,
@@ -43,6 +51,7 @@ use fuel_core_storage::{
         SealedBlockConsensus,
         Transactions,
     },
+    transactional::AtomicView,
 };
 use fuel_core_types::fuel_types::ContractId;
 use itertools::Itertools;
@@ -101,6 +110,8 @@ where
             ContractsState,
             ContractsAssets,
             FuelBlocks,
+            FuelBlockMerkleData,
+            FuelBlockMerkleMetadata,
             Transactions,
             SealedBlockConsensus,
             ProcessedTransactions
@@ -144,7 +155,12 @@ where
 
     async fn finalize(self) -> anyhow::Result<SnapshotMetadata> {
         let writer = self.create_writer()?;
-        let latest_block = self.db.on_chain().latest_block()?;
+        let view = self.db.on_chain().latest_view()?;
+        let latest_block = view.latest_block()?;
+        let blocks_root =
+            view.block_header_merkle_root(latest_block.header().height())?;
+        let latest_block =
+            LastBlockConfig::from_header(latest_block.header(), blocks_root);
 
         let writer_fragment = writer.partial_close()?;
         self.task_manager
@@ -154,7 +170,7 @@ where
             .try_fold(writer_fragment, |fragment, next_fragment| {
                 fragment.merge(next_fragment)
             })?
-            .finalize(Some(latest_block.header().into()), &self.prev_chain_config)
+            .finalize(Some(latest_block), &self.prev_chain_config)
     }
 
     fn create_writer(&self) -> anyhow::Result<SnapshotWriter> {
@@ -168,11 +184,10 @@ where
     ) -> anyhow::Result<()>
     where
         T: TableWithBlueprint + 'static + Send + Sync,
-        T::Blueprint: BlueprintInspect<T, Database<DbDesc>>,
         TableEntry<T>: serde::Serialize,
         StateConfigBuilder: AddTable<T>,
-        DbDesc: DatabaseDescription<Column = T::Column>,
-        DbDesc::Height: Send + Sync,
+        DbDesc: DatabaseDescription,
+        Database<DbDesc>: IterableTable<T>,
     {
         let mut writer = self.create_writer()?;
         let group_size = self.group_size;

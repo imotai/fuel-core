@@ -9,8 +9,9 @@ mod coins;
 mod contract;
 mod dap;
 mod debugger;
-mod deployment;
+mod dos;
 mod fee_collection_contract;
+mod local_node;
 
 mod gas_price;
 mod health;

@@ -89,8 +89,6 @@ pub type Service<V> = ServiceRunner<UninitializedTask<V, SharedState>>;
 enum TaskRequest {
     // Broadcast requests to p2p network
     BroadcastTransaction(Arc<Transaction>),
-    // Request to get one-off data from p2p network
-    GetPeerIds(oneshot::Sender<Vec<PeerId>>),
     // Request to get information about all connected peers
     GetAllPeerInfo {
         channel: oneshot::Sender<Vec<(PeerId, PeerInfo)>>,
@@ -119,9 +117,6 @@ impl Debug for TaskRequest {
             TaskRequest::BroadcastTransaction(_) => {
                 write!(f, "TaskRequest::BroadcastTransaction")
             }
-            TaskRequest::GetPeerIds(_) => {
-                write!(f, "TaskRequest::GetPeerIds")
-            }
             TaskRequest::GetSealedHeaders { .. } => {
                 write!(f, "TaskRequest::GetSealedHeaders")
             }
@@ -148,7 +143,6 @@ pub enum HeartBeatPeerReportReason {
 }
 
 pub trait TaskP2PService: Send {
-    fn get_peer_ids(&self) -> Vec<PeerId>;
     fn get_all_peer_info(&self) -> Vec<(&PeerId, &PeerInfo)>;
     fn get_peer_id_with_height(&self, height: &BlockHeight) -> Option<PeerId>;
 
@@ -189,10 +183,6 @@ pub trait TaskP2PService: Send {
 }
 
 impl TaskP2PService for FuelP2PService {
-    fn get_peer_ids(&self) -> Vec<PeerId> {
-        self.get_peers_ids_iter().copied().collect()
-    }
-
     fn get_all_peer_info(&self) -> Vec<(&PeerId, &PeerInfo)> {
         self.peer_manager().get_all_peers().collect()
     }
@@ -421,7 +411,7 @@ fn convert_peer_id(peer_id: &PeerId) -> anyhow::Result<FuelPeerId> {
 impl<V> RunnableService for UninitializedTask<V, SharedState>
 where
     V: AtomicView + 'static,
-    V::View: P2pDb,
+    V::LatestView: P2pDb,
 {
     const NAME: &'static str = "P2P";
 
@@ -447,7 +437,7 @@ where
             config,
         } = self;
 
-        let view = view_provider.latest_view();
+        let view = view_provider.latest_view()?;
         let genesis = view.get_genesis()?;
         let config = config.init(genesis)?;
         let Config {
@@ -502,7 +492,7 @@ impl<P, V, B> RunnableTask for Task<P, V, B>
 where
     P: TaskP2PService + 'static,
     V: AtomicView + 'static,
-    V::View: P2pDb,
+    V::LatestView: P2pDb,
     B: Broadcast + 'static,
 {
     async fn run(&mut self, watcher: &mut StateWatcher) -> anyhow::Result<bool> {
@@ -526,10 +516,6 @@ where
                         if let Err(e) = result {
                             tracing::error!("Got an error during transaction {} broadcasting {}", tx_id, e);
                         }
-                    }
-                    Some(TaskRequest::GetPeerIds(channel)) => {
-                        let peer_ids = self.p2p_service.get_peer_ids();
-                        let _ = channel.send(peer_ids);
                     }
                     Some(TaskRequest::GetSealedHeaders { block_height_range, channel}) => {
                         let channel = ResponseSender::SealedHeaders(channel);
@@ -592,7 +578,7 @@ where
                     Some(FuelP2PEvent::InboundRequestMessage { request_message, request_id }) => {
                         match request_message {
                             RequestMessage::Transactions(range) => {
-                                let view = self.view_provider.latest_view();
+                                let view = self.view_provider.latest_view()?;
                                 match view.get_transactions(range.clone()) {
                                     Ok(response) => {
                                         let _ = self.p2p_service.send_response_msg(request_id, ResponseMessage::Transactions(response));
@@ -613,7 +599,7 @@ where
                                     let response = None;
                                     let _ = self.p2p_service.send_response_msg(request_id, ResponseMessage::SealedHeaders(response));
                                 } else {
-                                    let view = self.view_provider.latest_view();
+                                    let view = self.view_provider.latest_view()?;
                                     match view.get_sealed_headers(range.clone()) {
                                         Ok(headers) => {
                                             let response = Some(headers);
@@ -756,16 +742,6 @@ impl SharedState {
         Ok(())
     }
 
-    pub async fn get_peer_ids(&self) -> anyhow::Result<Vec<PeerId>> {
-        let (sender, receiver) = oneshot::channel();
-
-        self.request_sender
-            .send(TaskRequest::GetPeerIds(sender))
-            .await?;
-
-        receiver.await.map_err(|e| anyhow!("{}", e))
-    }
-
     pub async fn get_all_peers(&self) -> anyhow::Result<Vec<(PeerId, PeerInfo)>> {
         let (sender, receiver) = oneshot::channel();
 
@@ -825,7 +801,7 @@ pub fn new_service<V, B>(
 ) -> Service<V>
 where
     V: AtomicView + 'static,
-    V::View: P2pDb,
+    V::LatestView: P2pDb,
     B: BlockHeightImporter,
 {
     let task =
@@ -891,20 +867,10 @@ pub mod tests {
     struct FakeDb;
 
     impl AtomicView for FakeDb {
-        type View = Self;
+        type LatestView = Self;
 
-        type Height = BlockHeight;
-
-        fn latest_height(&self) -> Option<Self::Height> {
-            Some(BlockHeight::default())
-        }
-
-        fn view_at(&self, _: &BlockHeight) -> StorageResult<Self::View> {
-            unimplemented!()
-        }
-
-        fn latest_view(&self) -> Self::View {
-            self.clone()
+        fn latest_view(&self) -> StorageResult<Self::LatestView> {
+            Ok(self.clone())
         }
     }
 
@@ -954,10 +920,6 @@ pub mod tests {
     }
 
     impl TaskP2PService for FakeP2PService {
-        fn get_peer_ids(&self) -> Vec<PeerId> {
-            todo!()
-        }
-
         fn get_all_peer_info(&self) -> Vec<(&PeerId, &PeerInfo)> {
             self.peer_info.iter().map(|tup| (&tup.0, &tup.1)).collect()
         }
@@ -1020,20 +982,10 @@ pub mod tests {
     struct FakeDB;
 
     impl AtomicView for FakeDB {
-        type View = Self;
+        type LatestView = Self;
 
-        type Height = BlockHeight;
-
-        fn latest_height(&self) -> Option<Self::Height> {
-            Some(BlockHeight::default())
-        }
-
-        fn view_at(&self, _: &BlockHeight) -> StorageResult<Self::View> {
-            unimplemented!()
-        }
-
-        fn latest_view(&self) -> Self::View {
-            self.clone()
+        fn latest_view(&self) -> StorageResult<Self::LatestView> {
+            Ok(self.clone())
         }
     }
 

@@ -5,7 +5,7 @@ use super::{
     StaticGasPrice,
 };
 use crate::{
-    database::Database,
+    database::OnChainIterableKeyValueView,
     fuel_core_graphql_api::ports::{
         worker,
         BlockProducerPort,
@@ -88,13 +88,13 @@ impl TxPoolPort for TxPoolAdapter {
     }
 }
 
-impl DatabaseMessageProof for Database {
+impl DatabaseMessageProof for OnChainIterableKeyValueView {
     fn block_history_proof(
         &self,
         message_block_height: &BlockHeight,
         commit_block_height: &BlockHeight,
     ) -> StorageResult<MerkleProof> {
-        Database::block_history_proof(self, message_block_height, commit_block_height)
+        self.block_history_proof(message_block_height, commit_block_height)
     }
 }
 
@@ -105,9 +105,10 @@ impl BlockProducerPort for BlockProducerAdapter {
         transactions: Vec<Transaction>,
         height: Option<BlockHeight>,
         utxo_validation: Option<bool>,
+        gas_price: Option<u64>,
     ) -> anyhow::Result<Vec<TransactionExecutionStatus>> {
         self.block_producer
-            .dry_run(transactions, height, utxo_validation)
+            .dry_run(transactions, height, utxo_validation, gas_price)
             .await
     }
 }

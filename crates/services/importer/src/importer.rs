@@ -3,6 +3,7 @@ use crate::{
         BlockVerifier,
         DatabaseTransaction,
         ImporterDatabase,
+        Transactional,
         Validator,
     },
     Config,
@@ -91,6 +92,8 @@ pub enum Error {
     ExecuteGenesis,
     #[display(fmt = "The database already contains the data at the height {_0}.")]
     NotUnique(BlockHeight),
+    #[display(fmt = "The previous block processing is not finished yet.")]
+    PreviousBlockProcessingNotFinished,
     #[from]
     StorageError(StorageError),
     UnsupportedConsensusVariant(String),
@@ -175,7 +178,7 @@ impl<D, E, V> Importer<D, E, V> {
 
 impl<D, E, V> Importer<D, E, V>
 where
-    D: ImporterDatabase,
+    D: ImporterDatabase + Transactional,
 {
     /// The method commits the result of the block execution attaching the consensus data.
     /// It expects that the `UncommittedResult` contains the result of the block
@@ -204,7 +207,18 @@ where
 
         // Await until all receivers of the notification process the result.
         if let Some(channel) = previous_block_result {
-            let _ = channel.await;
+            const TIMEOUT: u64 = 20;
+            let result =
+                tokio::time::timeout(tokio::time::Duration::from_secs(TIMEOUT), channel)
+                    .await;
+
+            if result.is_err() {
+                tracing::error!(
+                    "The previous block processing \
+                    was not finished for {TIMEOUT} seconds."
+                );
+                return Err(Error::PreviousBlockProcessingNotFinished)
+            }
         }
         let mut guard = self
             .database
@@ -421,7 +435,7 @@ where
 
 impl<IDatabase, E, V> Importer<IDatabase, E, V>
 where
-    IDatabase: ImporterDatabase + 'static,
+    IDatabase: ImporterDatabase + Transactional + 'static,
     E: Validator + 'static,
     V: BlockVerifier + 'static,
 {
@@ -455,7 +469,18 @@ where
 
         // Await until all receivers of the notification process the result.
         if let Some(channel) = previous_block_result {
-            let _ = channel.await;
+            const TIMEOUT: u64 = 20;
+            let result =
+                tokio::time::timeout(tokio::time::Duration::from_secs(TIMEOUT), channel)
+                    .await;
+
+            if result.is_err() {
+                tracing::error!(
+                    "The previous block processing \
+                     was not finished for {TIMEOUT} seconds."
+                );
+                return Err(Error::PreviousBlockProcessingNotFinished)
+            }
         }
 
         let start = Instant::now();
@@ -471,20 +496,6 @@ where
         importer_metrics().execute_and_commit_duration.observe(time);
         // return execution result
         commit_result
-    }
-}
-
-trait ShouldBeUnique {
-    fn should_be_unique(&self, height: &BlockHeight) -> Result<(), Error>;
-}
-
-impl<T> ShouldBeUnique for Option<T> {
-    fn should_be_unique(&self, height: &BlockHeight) -> Result<(), Error> {
-        if self.is_some() {
-            Err(Error::NotUnique(*height))
-        } else {
-            Ok(())
-        }
     }
 }
 

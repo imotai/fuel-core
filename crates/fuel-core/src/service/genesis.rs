@@ -178,6 +178,7 @@ pub fn create_genesis_block(config: &Config) -> Block {
     let da_height;
     let consensus_parameters_version;
     let state_transition_bytecode_version;
+    let prev_root;
 
     // If the rollup continues the old rollup, the height of the new block should
     // be higher than that of the old chain by one to make it continuous.
@@ -196,8 +197,8 @@ pub fn create_genesis_block(config: &Config) -> Block {
             .state_transition_version
             .checked_add(1)
             .expect("State transition bytecode version overflow");
-
         da_height = latest_block.da_block_height;
+        prev_root = latest_block.blocks_root;
     } else {
         height = 0u32.into();
         #[cfg(feature = "relayer")]
@@ -213,7 +214,12 @@ pub fn create_genesis_block(config: &Config) -> Block {
             da_height = 0u64.into();
         }
         consensus_parameters_version = ConsensusParametersVersion::MIN;
-        state_transition_bytecode_version = StateTransitionBytecodeVersion::MIN;
+        state_transition_bytecode_version = config
+            .snapshot_reader
+            .chain_config()
+            .genesis_state_transition_version
+            .unwrap_or(StateTransitionBytecodeVersion::MIN);
+        prev_root = Bytes32::zeroed();
     }
 
     let transactions_ids = vec![];
@@ -228,7 +234,7 @@ pub fn create_genesis_block(config: &Config) -> Block {
                 generated: Empty,
             },
             consensus: ConsensusHeader::<Empty> {
-                prev_root: Bytes32::zeroed(),
+                prev_root,
                 height,
                 time: fuel_core_types::tai64::Tai64::UNIX_EPOCH,
                 generated: Empty,
@@ -262,6 +268,7 @@ mod tests {
         Randomize,
         StateConfig,
     };
+    use fuel_core_producer::ports::BlockProducerDatabase;
     use fuel_core_services::RunnableService;
     use fuel_core_storage::{
         tables::{
@@ -269,6 +276,7 @@ mod tests {
             ContractsAssets,
             ContractsState,
         },
+        transactional::AtomicView,
         StorageAsRef,
     };
     use fuel_core_types::{
@@ -291,7 +299,7 @@ mod tests {
     use std::vec;
 
     #[tokio::test]
-    async fn config_initializes_block_height_of_genesic_block() {
+    async fn config_initializes_block_height_of_genesis_block() {
         let block_height = BlockHeight::from(99u32);
         let service_config = Config::local_node_with_state_config(StateConfig {
             last_block: Some(LastBlockConfig {
@@ -605,6 +613,8 @@ mod tests {
 
     fn get_coins(db: &CombinedDatabase, owner: &Address) -> Vec<Coin> {
         db.off_chain()
+            .latest_view()
+            .unwrap()
             .owned_coins_ids(owner, None, None)
             .map(|r| {
                 let coin_id = r.unwrap();
@@ -641,7 +651,18 @@ mod tests {
 
         let actual_state = db.read_state_config().unwrap();
         let mut expected_state = initial_state;
-        expected_state.last_block = Some(Default::default());
+        let mut last_block = LastBlockConfig::default();
+        let view = db.on_chain().latest_view().unwrap();
+        last_block.block_height = view.latest_height().unwrap();
+        last_block.state_transition_version = view
+            .latest_block()
+            .unwrap()
+            .header()
+            .state_transition_bytecode_version;
+        last_block.blocks_root = view
+            .block_header_merkle_root(&last_block.block_height)
+            .unwrap();
+        expected_state.last_block = Some(last_block);
         assert_eq!(expected_state, actual_state);
     }
 }

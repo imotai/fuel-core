@@ -4,7 +4,10 @@ use crate::{
         DatabaseDescription,
     },
     state::{
+        in_memory::memory_view::MemoryView,
+        iterable_key_value_view::IterableKeyValueViewWrapper,
         IterDirection,
+        IterableKeyValueView,
         TransactableStorage,
     },
 };
@@ -22,13 +25,20 @@ use fuel_core_storage::{
         Value,
         WriteOperation,
     },
-    transactional::Changes,
+    transactional::{
+        Changes,
+        ReferenceBytesKey,
+    },
     Result as StorageResult,
 };
 use std::{
     collections::BTreeMap,
     fmt::Debug,
-    sync::Mutex,
+    ops::Deref,
+    sync::{
+        Arc,
+        Mutex,
+    },
 };
 
 #[derive(Debug)]
@@ -36,7 +46,7 @@ pub struct MemoryStore<Description = OnChain>
 where
     Description: DatabaseDescription,
 {
-    inner: Vec<Mutex<BTreeMap<Vec<u8>, Value>>>,
+    inner: Vec<Mutex<BTreeMap<ReferenceBytesKey, Value>>>,
     _marker: core::marker::PhantomData<Description>,
 }
 
@@ -59,6 +69,23 @@ impl<Description> MemoryStore<Description>
 where
     Description: DatabaseDescription,
 {
+    fn create_view(&self) -> MemoryView<Description> {
+        // Lock all tables at the same time to have consistent view.
+        let locks = self
+            .inner
+            .iter()
+            .map(|lock| lock.lock().expect("Poisoned lock"))
+            .collect::<Vec<_>>();
+        let inner = locks
+            .iter()
+            .map(|btree| btree.deref().clone())
+            .collect::<Vec<_>>();
+        MemoryView {
+            inner,
+            _marker: Default::default(),
+        }
+    }
+
     pub fn iter_all(
         &self,
         column: Description::Column,
@@ -68,12 +95,8 @@ where
     ) -> impl Iterator<Item = KVItem> {
         let lock = self.inner[column.as_usize()].lock().expect("poisoned");
 
-        fn clone<K: Clone, V: Clone>(kv: (&K, &V)) -> (K, V) {
-            (kv.0.clone(), kv.1.clone())
-        }
-
         let collection: Vec<_> = iterator(&lock, prefix, start, direction)
-            .map(clone)
+            .map(|(key, value)| (key.clone().into(), value.clone()))
             .collect();
 
         collection.into_iter().map(Ok)
@@ -90,7 +113,7 @@ where
         Ok(self.inner[column.as_usize()]
             .lock()
             .map_err(|e| anyhow::anyhow!("The lock is poisoned: {}", e))?
-            .get(&key.to_vec())
+            .get(key)
             .cloned())
     }
 }
@@ -136,6 +159,13 @@ where
             }
         }
         Ok(())
+    }
+
+    fn latest_view(&self) -> StorageResult<IterableKeyValueView<Self::Column>> {
+        let view = self.create_view();
+        Ok(IterableKeyValueView::from_storage(
+            IterableKeyValueViewWrapper::new(Arc::new(view)),
+        ))
     }
 }
 

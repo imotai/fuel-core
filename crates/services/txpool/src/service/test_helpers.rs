@@ -5,13 +5,13 @@ use crate::{
         BlockImporter,
         MockConsensusParametersProvider,
     },
+    types::GasPrice,
     MockDb,
 };
 use fuel_core_services::{
     stream::BoxStream,
     Service as ServiceTrait,
 };
-use fuel_core_txpool::types::GasPrice;
 use fuel_core_types::{
     blockchain::SealedBlock,
     entities::coins::coin::Coin,
@@ -26,14 +26,27 @@ use fuel_core_types::{
         TransactionBuilder,
         Word,
     },
+    fuel_vm::interpreter::MemoryInstance,
     services::{
         block_importer::ImportResult,
         p2p::GossipsubMessageAcceptance,
+        txpool::Result as TxPoolResult,
     },
 };
 use std::cell::RefCell;
 
 type GossipedTransaction = GossipData<Transaction>;
+
+pub struct DummyPool;
+
+#[async_trait::async_trait]
+impl MemoryPool for DummyPool {
+    type Memory = MemoryInstance;
+
+    async fn get_memory(&self) -> Self::Memory {
+        MemoryInstance::new()
+    }
+}
 
 pub struct TestContext {
     pub(crate) service: Service<
@@ -41,6 +54,7 @@ pub struct TestContext {
         MockDBProvider,
         MockTxPoolGasPrice,
         MockConsensusParametersProvider,
+        DummyPool,
     >,
     mock_db: MockDb,
     rng: RefCell<StdRng>,
@@ -63,9 +77,12 @@ impl MockTxPoolGasPrice {
     }
 }
 
+#[async_trait::async_trait]
 impl GasPriceProviderConstraint for MockTxPoolGasPrice {
-    fn gas_price(&self, _block_height: BlockHeight) -> Option<GasPrice> {
-        self.gas_price
+    async fn last_gas_price(&self) -> TxPoolResult<GasPrice> {
+        self.gas_price.ok_or(TxPoolError::GasPriceNotFound(
+            "Gas price not found".to_string(),
+        ))
     }
 }
 
@@ -81,6 +98,7 @@ impl TestContext {
         MockDBProvider,
         MockTxPoolGasPrice,
         MockConsensusParametersProvider,
+        DummyPool,
     > {
         &self.service
     }
@@ -257,6 +275,7 @@ impl TestContextBuilder {
             Default::default(),
             gas_price_provider,
             consensus_parameters_provider,
+            DummyPool,
         );
 
         TestContext {

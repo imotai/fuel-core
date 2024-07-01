@@ -5,19 +5,109 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+
+### Added
+- [#1994](https://github.com/FuelLabs/fuel-core/pull/1994): Added the actual implementation for the `AtomicView::latest_view`.
+- [#1972](https://github.com/FuelLabs/fuel-core/pull/1972): Implement `AlgorithmUpdater` for `GasPriceService`
+- [#1948](https://github.com/FuelLabs/fuel-core/pull/1948): Add new `AlgorithmV1` and `AlgorithmUpdaterV1` for the gas price. Include tools for analysis
+
+### Changed
+- [#1990](https://github.com/FuelLabs/fuel-core/pull/1990): Use latest view for mutate GraphQL queries after modification of the node.
+- [#1992](https://github.com/FuelLabs/fuel-core/pull/1992): Parse multiple relayer contracts, `RELAYER-V2-LISTENING-CONTRACTS` env variable using a `,` delimiter.
+
+#### Breaking
+- [#1991](https://github.com/FuelLabs/fuel-core/pull/1991): Prepare the database to use different types than `Database` for atomic view.
+- [#1989](https://github.com/FuelLabs/fuel-core/pull/1989): Extract `HistoricalView` trait from the `AtomicView`.
+
+## [Version 0.30.0]
+
+### Added
+- [#1975](https://github.com/FuelLabs/fuel-core/pull/1975): Added `DependentCost` benchmarks for the `cfe` and `cfei` opcodes.
+- [#1975](https://github.com/FuelLabs/fuel-core/pull/1975): Added `DependentCost` for the `cfe` opcode to the `GasCosts` endpoint.
+- [#1974](https://github.com/FuelLabs/fuel-core/pull/1974): Optimized the work of `InMemoryTransaction` for lookups and empty insertion.
+
+### Changed
+- [#1973](https://github.com/FuelLabs/fuel-core/pull/1973): Updated VM initialization benchmark to include many inputs and outputs.
+
+#### Breaking
+- [#1975](https://github.com/FuelLabs/fuel-core/pull/1975): Updated gas prices according to new release.
+- [#1975](https://github.com/FuelLabs/fuel-core/pull/1975): Changed `GasCosts` endpoint to return `DependentCost` for the `cfei` opcode via `cfeiDependentCost`.
+- [#1975](https://github.com/FuelLabs/fuel-core/pull/1975): Use `fuel-vm 0.54.0`. More information in the [release](https://github.com/FuelLabs/fuel-vm/releases/tag/v0.54.0).
+
+## [Version 0.29.0]
+
+### Added
+- [#1676](https://github.com/FuelLabs/fuel-core/pull/1676): Added new CLI arguments:
+  - `graphql-max-depth`
+  - `graphql-max-complexity`
+  - `graphql-max-recursive-depth`
+- [#1889](https://github.com/FuelLabs/fuel-core/pull/1889): Add new `FuelGasPriceProvider` that receives the gas price algorithm from a `GasPriceService`
+
+### Changed
+- [#1676](https://github.com/FuelLabs/fuel-core/pull/1676): Changed default value for `api-request-timeout` to be `30s`.
+- [#1942](https://github.com/FuelLabs/fuel-core/pull/1942): Sequential relayer's commits.
+- [#1952](https://github.com/FuelLabs/fuel-core/pull/1952): Change tip sorting to ratio between tip and max gas sorting in txpool
+- [#1960](https://github.com/FuelLabs/fuel-core/pull/1960): Update fuel-vm to v0.53.0.
+- [#1964](https://github.com/FuelLabs/fuel-core/pull/1964): Add `creation_instant` as second sort key in tx pool
+
+#### Breaking
+
+- [#1676](https://github.com/FuelLabs/fuel-core/pull/1676): Now, GraphQL API has complexity and depth limitations on the queries. The default complexity limit is `20000`. It is ~50 blocks per request with transaction IDs and ~2-5 full blocks.
+- [#1676](https://github.com/FuelLabs/fuel-core/pull/1676): New `fuel-core-client` is incompatible with the old `fuel-core` because of two requested new fields.
+
+### Fixed
+- [#1962](https://github.com/FuelLabs/fuel-core/pull/1962): Fixes the error message for incorrect keypair's path.
+- [#1950](https://github.com/FuelLabs/fuel-core/pull/1950): Fix cursor `BlockHeight` encoding in `SortedTXCursor`
+
+## [Version 0.28.0]
+
+### Changed
+- [#1934](https://github.com/FuelLabs/fuel-core/pull/1934): Updated benchmark for the `aloc` opcode to be `DependentCost`. Updated `vm_initialization` benchmark to exclude growing of memory(It is handled by VM reuse).
+- [#1916](https://github.com/FuelLabs/fuel-core/pull/1916): Speed up synchronisation of the blocks for the `fuel-core-sync` service.
+- [#1888](https://github.com/FuelLabs/fuel-core/pull/1888): optimization: Reuse VM memory across executions.
+
+#### Breaking
+
+- [#1934](https://github.com/FuelLabs/fuel-core/pull/1934): Changed `GasCosts` endpoint to return `DependentCost` for the `aloc` opcode via `alocDependentCost`.
+- [#1934](https://github.com/FuelLabs/fuel-core/pull/1934): Updated default gas costs for the local testnet configuration. All opcodes became cheaper.
+- [#1924](https://github.com/FuelLabs/fuel-core/pull/1924): `dry_run_opt` has new `gas_price: Option<u64>` argument
+- [#1888](https://github.com/FuelLabs/fuel-core/pull/1888): Upgraded `fuel-vm` to `0.51.0`. See [release](https://github.com/FuelLabs/fuel-vm/releases/tag/v0.51.0) for more information.
+
+### Added
+- [#1939](https://github.com/FuelLabs/fuel-core/pull/1939): Added API functions to open a RocksDB in different modes.
+- [#1929](https://github.com/FuelLabs/fuel-core/pull/1929): Added support of customization of the state transition version in the `ChainConfig`.
+
+### Removed
+- [#1913](https://github.com/FuelLabs/fuel-core/pull/1913): Removed dead code from the project.
+
+### Fixed
+- [#1921](https://github.com/FuelLabs/fuel-core/pull/1921): Fixed unstable `gossipsub_broadcast_tx_with_accept` test.
+- [#1915](https://github.com/FuelLabs/fuel-core/pull/1915): Fixed reconnection issue in the dev cluster with AWS cluster.
+- [#1914](https://github.com/FuelLabs/fuel-core/pull/1914): Fixed halting of the node during synchronization in PoA service.
+
+## [Version 0.27.0]
+
+### Added
+
+- [#1895](https://github.com/FuelLabs/fuel-core/pull/1895): Added backward and forward compatibility integration tests for forkless upgrades.
+- [#1898](https://github.com/FuelLabs/fuel-core/pull/1898): Enforce increasing of the `Executor::VERSION` on each release.
+
 ### Changed
 
+- [#1906](https://github.com/FuelLabs/fuel-core/pull/1906): Makes `cli::snapshot::Command` members public such that clients can create and execute snapshot commands programmatically. This enables snapshot execution in external programs, such as the regenesis test suite. 
+- [#1891](https://github.com/FuelLabs/fuel-core/pull/1891): Regenesis now preserves `FuelBlockMerkleData` and `FuelBlockMerkleMetadata` in the off-chain table. These tables are checked when querying message proofs.
 - [#1886](https://github.com/FuelLabs/fuel-core/pull/1886): Use ref to `Block` in validation code
 - [#1876](https://github.com/FuelLabs/fuel-core/pull/1876): Updated benchmark to include the worst scenario for `CROO` opcode. Also include consensus parameters in bench output.
-
-### Changed
-
 - [#1879](https://github.com/FuelLabs/fuel-core/pull/1879): Return the old behaviour for the `discovery_works` test.
 - [#1848](https://github.com/FuelLabs/fuel-core/pull/1848): Added `version` field to the `Block` and `BlockHeader` GraphQL entities. Added corresponding `version` field to the `Block` and `BlockHeader` client types in `fuel-core-client`.
-
-### Changed
-
 - [#1873](https://github.com/FuelLabs/fuel-core/pull/1873/): Separate dry runs from block production in executor code, remove `ExecutionKind` and `ExecutionType`, remove `thread_block_transaction` concept, remove `PartialBlockComponent` type, refactor away `inner` functions.
+- [#1900](https://github.com/FuelLabs/fuel-core/pull/1900): Update the root README as `fuel-core run` no longer has `--chain` as an option. It has been replaced by `--snapshot`.
+
+#### Breaking
+
+- [#1894](https://github.com/FuelLabs/fuel-core/pull/1894): Use testnet configuration for local testnet.
+- [#1894](https://github.com/FuelLabs/fuel-core/pull/1894): Removed support for helm chart.
+- [#1910](https://github.com/FuelLabs/fuel-core/pull/1910): `fuel-vm` upgraded to `0.50.0`. More information in the [changelog](https://github.com/FuelLabs/fuel-vm/releases/tag/v0.50.0).
 
 ## [Version 0.26.0]
 

@@ -16,6 +16,7 @@ use fuel_core::{
 use fuel_core_client::client::FuelClient;
 use fuel_core_poa::Trigger;
 use fuel_core_types::{
+    blockchain::header::LATEST_STATE_TRANSITION_VERSION,
     fuel_asm::op,
     fuel_tx::{
         field::Inputs,
@@ -94,6 +95,7 @@ pub struct TestSetupBuilder {
     pub starting_block: Option<BlockHeight>,
     pub utxo_validation: bool,
     pub privileged_address: Address,
+    pub base_asset_id: AssetId,
     pub trigger: Trigger,
 }
 
@@ -187,7 +189,7 @@ impl TestSetupBuilder {
     // setup chainspec and spin up a fuel-node
     pub async fn finalize(&mut self) -> TestContext {
         let metadata =
-            SnapshotMetadata::read("../bin/fuel-core/chainspec/testnet").unwrap();
+            SnapshotMetadata::read("../bin/fuel-core/chainspec/local-testnet").unwrap();
         let mut chain_conf = ChainConfig::from_snapshot_metadata(&metadata).unwrap();
 
         if let Some(gas_limit) = self.gas_limit {
@@ -203,10 +205,13 @@ impl TestSetupBuilder {
         chain_conf
             .consensus_parameters
             .set_privileged_address(self.privileged_address);
+        chain_conf
+            .consensus_parameters
+            .set_base_asset_id(self.base_asset_id);
 
         let latest_block = self.starting_block.map(|starting_block| LastBlockConfig {
             block_height: starting_block,
-            state_transition_version: 0,
+            state_transition_version: LATEST_STATE_TRANSITION_VERSION - 1,
             ..Default::default()
         });
 
@@ -247,6 +252,7 @@ impl Default for TestSetupBuilder {
             starting_block: None,
             utxo_validation: true,
             privileged_address: Default::default(),
+            base_asset_id: AssetId::BASE,
             trigger: Trigger::Instant,
         }
     }

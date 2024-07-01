@@ -1,13 +1,7 @@
 use clap::Parser;
-use fuel_core::{
-    chain_config::{
-        ChainConfig,
-        SnapshotWriter,
-    },
-    service::{
-        FuelService,
-        ServiceTrait,
-    },
+use fuel_core::chain_config::{
+    ChainConfig,
+    SnapshotWriter,
 };
 use fuel_core_bin::cli::snapshot;
 use fuel_core_client::client::{
@@ -22,64 +16,29 @@ use fuel_core_client::client::{
     FuelClient,
 };
 use fuel_core_types::{
+    blockchain::header::LATEST_STATE_TRANSITION_VERSION,
+    fuel_asm::{
+        op,
+        GTFArgs,
+        RegId,
+    },
+    fuel_crypto::PublicKey,
+    fuel_merkle::binary,
     fuel_tx::*,
     fuel_vm::*,
 };
+use itertools::Itertools;
 use rand::{
     rngs::StdRng,
     Rng,
     SeedableRng,
 };
+use std::ops::Deref;
 use tempfile::{
     tempdir,
     TempDir,
 };
-
-pub struct FuelCoreDriver {
-    /// This must be before the db_dir as the drop order matters here
-    pub node: FuelService,
-    pub db_dir: TempDir,
-    pub client: FuelClient,
-}
-impl FuelCoreDriver {
-    pub async fn spawn(extra_args: &[&str]) -> anyhow::Result<Self> {
-        // Generate temp params
-        let db_dir = tempdir()?;
-
-        let mut args = vec![
-            "_IGNORED_",
-            "--db-path",
-            db_dir.path().to_str().unwrap(),
-            "--port",
-            "0",
-        ];
-        args.extend(extra_args);
-
-        let node = fuel_core_bin::cli::run::get_service(
-            fuel_core_bin::cli::run::Command::parse_from(args),
-        )?;
-
-        node.start_and_await().await?;
-
-        let client = FuelClient::from(node.shared.graph_ql.bound_address);
-        Ok(Self {
-            node,
-            db_dir,
-            client,
-        })
-    }
-
-    /// Stops the node, returning the db only
-    /// Ignoring the return value drops the db as well.
-    pub async fn kill(self) -> TempDir {
-        println!("Stopping fuel service");
-        self.node
-            .stop_and_await()
-            .await
-            .expect("Failed to stop the node");
-        self.db_dir
-    }
-}
+use test_helpers::fuel_core_driver::FuelCoreDriver;
 
 async fn produce_block_with_tx(rng: &mut StdRng, client: &FuelClient) {
     let secret = SecretKey::random(rng);
@@ -379,6 +338,153 @@ async fn test_regenesis_processed_transactions_are_preserved() -> anyhow::Result
         panic!("Expected transaction to be squeezed out")
     };
     assert!(reason.contains("Transaction id was already used"));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_regenesis_message_proofs_are_preserved() -> anyhow::Result<()> {
+    let mut rng = StdRng::seed_from_u64(1234);
+    let core = FuelCoreDriver::spawn(&["--debug", "--poa-instant", "true"]).await?;
+    let base_asset_id = *core
+        .node
+        .shared
+        .config
+        .snapshot_reader
+        .chain_config()
+        .consensus_parameters
+        .base_asset_id();
+
+    let secret = SecretKey::random(&mut rng);
+    let public_key: PublicKey = (&secret).into();
+    let address = Input::owner(&public_key);
+    let script_data = [address.to_vec(), 100u64.to_be_bytes().to_vec()]
+        .into_iter()
+        .flatten()
+        .collect_vec();
+    let script: Vec<u8> = vec![
+        op::gtf(0x10, 0x00, GTFArgs::ScriptData.into()),
+        op::addi(0x11, 0x10, Bytes32::LEN as u16),
+        op::lw(0x11, 0x11, 0),
+        op::smo(0x10, 0x00, 0x00, 0x11),
+        op::ret(RegId::ONE),
+    ]
+    .into_iter()
+    .collect();
+
+    // Given
+    let tx = TransactionBuilder::script(script, script_data)
+        .add_unsigned_coin_input(
+            secret,
+            rng.gen(),
+            100_000_000,
+            base_asset_id,
+            Default::default(),
+        )
+        .add_output(Output::change(
+            Default::default(),
+            Default::default(),
+            base_asset_id,
+        ))
+        .max_fee_limit(1_000_000)
+        .script_gas_limit(1_000_000)
+        .finalize_as_transaction();
+
+    let tx_id = tx.id(&Default::default());
+
+    core.client.submit_and_await_commit(&tx).await.unwrap();
+    let message_block = core.client.chain_info().await.unwrap().latest_block;
+    let message_block_height = message_block.header.height;
+
+    core.client.produce_blocks(10, None).await.unwrap();
+
+    let receipts = core.client.receipts(&tx_id).await.unwrap().unwrap();
+    let nonces: Vec<_> = receipts.iter().filter_map(|r| r.nonce()).collect();
+    let nonce = nonces[0];
+
+    let proof = core
+        .client
+        .message_proof(&tx_id, nonce, None, Some((message_block_height + 1).into()))
+        .await
+        .expect("Unable to get message proof")
+        .expect("Message proof not found");
+    let prev_root = proof.commit_block_header.prev_root;
+    let block_proof_index = proof.block_proof.proof_index;
+    let block_proof_set: Vec<_> = proof
+        .block_proof
+        .proof_set
+        .iter()
+        .map(|bytes| *bytes.deref())
+        .collect();
+    assert!(binary::verify(
+        &prev_root,
+        &proof.message_block_header.id,
+        &block_proof_set,
+        block_proof_index,
+        proof.commit_block_header.height as u64,
+    ));
+
+    // When
+    let db_dir = core.kill().await;
+
+    // ------------------------- The genesis node is stopped -------------------------
+
+    // Take a snapshot
+    let snapshot_dir = tempdir().expect("Failed to create temp dir");
+    take_snapshot(&db_dir, &snapshot_dir)
+        .await
+        .expect("Failed to take first snapshot");
+
+    // ------------------------- Start a node with the regenesis -------------------------
+
+    // Regenesis increases the version of the executor by one.
+    // We want to use native execution to produce blocks,
+    // so we override the version of the native executor.
+    let latest_state_transition_version = LATEST_STATE_TRANSITION_VERSION
+        .saturating_add(1)
+        .to_string();
+    let core = FuelCoreDriver::spawn(&[
+        "--debug",
+        "--poa-instant",
+        "true",
+        "--snapshot",
+        snapshot_dir.path().to_str().unwrap(),
+        "--native-executor-version",
+        latest_state_transition_version.as_str(),
+    ])
+    .await?;
+
+    core.client.produce_blocks(10, None).await.unwrap();
+    let latest_block = core.client.chain_info().await.unwrap().latest_block;
+    let receipts = core.client.receipts(&tx_id).await.unwrap().unwrap();
+    let nonces: Vec<_> = receipts.iter().filter_map(|r| r.nonce()).collect();
+    let nonce = nonces[0];
+
+    for block_height in message_block_height + 1..latest_block.header.height {
+        let proof = core
+            .client
+            .message_proof(&tx_id, nonce, None, Some(block_height.into()))
+            .await
+            .expect("Unable to get message proof")
+            .expect("Message proof not found");
+        let prev_root = proof.commit_block_header.prev_root;
+        let block_proof_set: Vec<_> = proof
+            .block_proof
+            .proof_set
+            .iter()
+            .map(|bytes| *bytes.deref())
+            .collect();
+        let block_proof_index = proof.block_proof.proof_index;
+        let message_block_id = proof.message_block_header.id;
+        let count = proof.commit_block_header.height as u64;
+        assert!(binary::verify(
+            &prev_root,
+            &message_block_id,
+            &block_proof_set,
+            block_proof_index,
+            count,
+        ));
+    }
 
     Ok(())
 }

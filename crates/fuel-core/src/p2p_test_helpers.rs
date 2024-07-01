@@ -27,6 +27,7 @@ use fuel_core_poa::{
 };
 use fuel_core_storage::{
     tables::Transactions,
+    transactional::AtomicView,
     StorageAsRef,
 };
 use fuel_core_types::{
@@ -299,10 +300,20 @@ pub async fn make_nodes(
         {
             match bootstrap_type {
                 BootstrapType::BootstrapNodes => {
-                    node_config.p2p.as_mut().unwrap().bootstrap_nodes = boots.clone();
+                    node_config
+                        .p2p
+                        .as_mut()
+                        .unwrap()
+                        .bootstrap_nodes
+                        .clone_from(&boots);
                 }
                 BootstrapType::ReservedNodes => {
-                    node_config.p2p.as_mut().unwrap().reserved_nodes = boots.clone();
+                    node_config
+                        .p2p
+                        .as_mut()
+                        .unwrap()
+                        .reserved_nodes
+                        .clone_from(&boots);
                 }
             }
 
@@ -341,10 +352,20 @@ pub async fn make_nodes(
 
             match bootstrap_type {
                 BootstrapType::BootstrapNodes => {
-                    node_config.p2p.as_mut().unwrap().bootstrap_nodes = boots.clone();
+                    node_config
+                        .p2p
+                        .as_mut()
+                        .unwrap()
+                        .bootstrap_nodes
+                        .clone_from(&boots);
                 }
                 BootstrapType::ReservedNodes => {
-                    node_config.p2p.as_mut().unwrap().reserved_nodes = boots.clone();
+                    node_config
+                        .p2p
+                        .as_mut()
+                        .unwrap()
+                        .reserved_nodes
+                        .clone_from(&boots);
                 }
             }
             update_signing_key(&mut node_config, pub_key);
@@ -411,7 +432,7 @@ async fn extract_p2p_config(node_config: &Config) -> fuel_core_p2p::config::Conf
         .unwrap();
     bootstrap_config
         .unwrap()
-        .init(db.on_chain().get_genesis().unwrap())
+        .init(db.on_chain().latest_view().unwrap().get_genesis().unwrap())
         .unwrap()
 }
 

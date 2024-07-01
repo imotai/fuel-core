@@ -38,9 +38,7 @@ query {
           signature
         }
       }
-      transactions {
-        id
-      }
+      transactionIds
     }
     consensusParameters {
       version
@@ -82,7 +80,6 @@ query {
         version
         add
         addi
-        aloc
         and
         andi
         bal
@@ -90,7 +87,6 @@ query {
         bhsh
         burn
         cb
-        cfei
         cfsi
         div
         divi
@@ -168,6 +164,39 @@ query {
         wqmm
         xor
         xori
+        alocDependentCost {
+          __typename
+          ... on LightOperation {
+            base
+            unitsPerGas
+          }
+          ... on HeavyOperation {
+            base
+            gasPerUnit
+          }
+        }
+        cfe {
+          __typename
+          ... on LightOperation {
+            base
+            unitsPerGas
+          }
+          ... on HeavyOperation {
+            base
+            gasPerUnit
+          }
+        }
+        cfeiDependentCost {
+          __typename
+          ... on LightOperation {
+            base
+            unitsPerGas
+          }
+          ... on HeavyOperation {
+            base
+            gasPerUnit
+          }
+        }
         call {
           __typename
           ... on LightOperation {

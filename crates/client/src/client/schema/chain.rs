@@ -199,7 +199,6 @@ pub struct GasCosts {
     pub version: GasCostsVersion,
     pub add: U64,
     pub addi: U64,
-    pub aloc: U64,
     pub and: U64,
     pub andi: U64,
     pub bal: U64,
@@ -207,7 +206,6 @@ pub struct GasCosts {
     pub bhsh: U64,
     pub burn: U64,
     pub cb: U64,
-    pub cfei: U64,
     pub cfsi: U64,
     pub div: U64,
     pub divi: U64,
@@ -286,6 +284,9 @@ pub struct GasCosts {
     pub xor: U64,
     pub xori: U64,
 
+    pub aloc_dependent_cost: DependentCost,
+    pub cfe: DependentCost,
+    pub cfei_dependent_cost: DependentCost,
     pub call: DependentCost,
     pub ccp: DependentCost,
     pub croo: DependentCost,
@@ -324,10 +325,9 @@ impl TryFrom<GasCosts> for fuel_core_types::fuel_tx::GasCosts {
     fn try_from(value: GasCosts) -> Result<Self, Self::Error> {
         match value.version {
             GasCostsVersion::V1 => {
-                let values = fuel_core_types::fuel_tx::consensus_parameters::gas::GasCostsValuesV1 {
+                let values = fuel_core_types::fuel_tx::consensus_parameters::gas::GasCostsValuesV3 {
                     add: value.add.into(),
                     addi: value.addi.into(),
-                    aloc: value.aloc.into(),
                     and: value.and.into(),
                     andi: value.andi.into(),
                     bal: value.bal.into(),
@@ -335,7 +335,6 @@ impl TryFrom<GasCosts> for fuel_core_types::fuel_tx::GasCosts {
                     bhsh: value.bhsh.into(),
                     burn: value.burn.into(),
                     cb: value.cb.into(),
-                    cfei: value.cfei.into(),
                     cfsi: value.cfsi.into(),
                     div: value.div.into(),
                     divi: value.divi.into(),
@@ -413,6 +412,10 @@ impl TryFrom<GasCosts> for fuel_core_types::fuel_tx::GasCosts {
                     wqmm: value.wqmm.into(),
                     xor: value.xor.into(),
                     xori: value.xori.into(),
+
+                    aloc: value.aloc_dependent_cost.into(),
+                    cfe: value.cfe.into(),
+                    cfei: value.cfei_dependent_cost.into(),
                     call: value.call.into(),
                     ccp: value.ccp.into(),
                     croo: value.croo.into(),

@@ -11,6 +11,7 @@ use crate::{
         },
         database::ReadView,
         IntoApiResult,
+        QUERY_COSTS,
     },
     query::{
         SimpleBlockData,
@@ -36,6 +37,7 @@ use crate::{
             output,
             upgrade_purpose::UpgradePurpose,
         },
+        ReadViewProvider,
     },
 };
 use async_graphql::{
@@ -89,6 +91,7 @@ use fuel_core_types::{
     },
     tai64::Tai64,
 };
+use std::vec::IntoIter;
 
 pub struct ProgramState {
     return_type: ReturnType,
@@ -170,8 +173,13 @@ impl SuccessStatus {
         self.tx_id.into()
     }
 
+    async fn block_height(&self) -> U32 {
+        self.block_height.into()
+    }
+
+    #[graphql(complexity = "QUERY_COSTS.storage_read + child_complexity")]
     async fn block(&self, ctx: &Context<'_>) -> async_graphql::Result<Block> {
-        let query: &ReadView = ctx.data_unchecked();
+        let query = ctx.read_view()?;
         let block = query.block(&self.block_height)?;
         Ok(block.into())
     }
@@ -214,8 +222,13 @@ impl FailureStatus {
         self.tx_id.into()
     }
 
+    async fn block_height(&self) -> U32 {
+        self.block_height.into()
+    }
+
+    #[graphql(complexity = "QUERY_COSTS.storage_read + child_complexity")]
     async fn block(&self, ctx: &Context<'_>) -> async_graphql::Result<Block> {
-        let query: &ReadView = ctx.data_unchecked();
+        let query = ctx.read_view()?;
         let block = query.block(&self.block_height)?;
         Ok(block.into())
     }
@@ -385,6 +398,7 @@ impl Transaction {
         TransactionId(self.1)
     }
 
+    #[graphql(complexity = "QUERY_COSTS.storage_read")]
     async fn input_asset_ids(&self, ctx: &Context<'_>) -> Option<Vec<AssetId>> {
         let params = ctx
             .data_unchecked::<ConsensusProvider>()
@@ -417,20 +431,20 @@ impl Transaction {
 
     async fn input_contracts(&self) -> Option<Vec<ContractId>> {
         match &self.0 {
-            fuel_tx::Transaction::Script(script) => {
-                Some(script.input_contracts().map(|v| (*v).into()).collect())
+            fuel_tx::Transaction::Script(tx) => {
+                Some(input_contracts(tx).map(|v| (*v).into()).collect())
             }
-            fuel_tx::Transaction::Create(create) => {
-                Some(create.input_contracts().map(|v| (*v).into()).collect())
+            fuel_tx::Transaction::Create(tx) => {
+                Some(input_contracts(tx).map(|v| (*v).into()).collect())
             }
             fuel_tx::Transaction::Mint(mint) => {
                 Some(vec![mint.input_contract().contract_id.into()])
             }
             fuel_tx::Transaction::Upgrade(tx) => {
-                Some(tx.input_contracts().map(|v| (*v).into()).collect())
+                Some(input_contracts(tx).map(|v| (*v).into()).collect())
             }
             fuel_tx::Transaction::Upload(tx) => {
-                Some(tx.input_contracts().map(|v| (*v).into()).collect())
+                Some(input_contracts(tx).map(|v| (*v).into()).collect())
             }
         }
     }
@@ -626,14 +640,15 @@ impl Transaction {
         }
     }
 
+    #[graphql(complexity = "QUERY_COSTS.storage_read + child_complexity")]
     async fn status(
         &self,
         ctx: &Context<'_>,
     ) -> async_graphql::Result<Option<TransactionStatus>> {
         let id = self.1;
-        let query: &ReadView = ctx.data_unchecked();
+        let query = ctx.read_view()?;
         let txpool = ctx.data_unchecked::<TxPool>();
-        get_tx_status(id, query, txpool).map_err(Into::into)
+        get_tx_status(id, query.as_ref(), txpool).map_err(Into::into)
     }
 
     async fn script(&self) -> Option<HexString> {
@@ -761,6 +776,7 @@ impl Transaction {
         }
     }
 
+    #[graphql(complexity = "QUERY_COSTS.raw_payload")]
     /// Return the transaction bytes using canonical encoding
     async fn raw_payload(&self) -> HexString {
         HexString(self.0.clone().to_bytes())
@@ -800,6 +816,26 @@ impl DryRunTransactionStatus {
             }),
         }
     }
+}
+
+fn input_contracts<Tx>(tx: &Tx) -> IntoIter<&fuel_core_types::fuel_types::ContractId>
+where
+    Tx: Inputs,
+{
+    let mut inputs: Vec<_> = tx
+        .inputs()
+        .iter()
+        .filter_map(|input| match input {
+            fuel_tx::Input::Contract(fuel_tx::input::contract::Contract {
+                contract_id,
+                ..
+            }) => Some(contract_id),
+            _ => None,
+        })
+        .collect();
+    inputs.sort();
+    inputs.dedup();
+    inputs.into_iter()
 }
 
 #[derive(Debug)]

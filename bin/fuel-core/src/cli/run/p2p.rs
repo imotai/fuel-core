@@ -152,6 +152,10 @@ pub struct P2PArgs {
     #[clap(long = "request-timeout", default_value = "20", env)]
     pub request_timeout: u64,
 
+    /// Choose max concurrent streams for RequestResponse protocol
+    #[clap(long = "request-max-concurrent-streams", default_value = "256", env)]
+    pub max_concurrent_streams: usize,
+
     /// Choose how long RequestResponse protocol connections will live if idle
     #[clap(long = "connection-keep-alive", default_value = "20", env)]
     pub connection_keep_alive: u64,
@@ -210,7 +214,13 @@ impl KeypairArg {
         }
         let path = PathBuf::from_str(s);
         if let Ok(pathbuf) = path {
-            return Ok(KeypairArg::Path(pathbuf))
+            if pathbuf.exists() {
+                return Ok(KeypairArg::Path(pathbuf))
+            } else {
+                return Err(anyhow!(
+                    "path `{pathbuf:?}` does not exist for keypair argument"
+                ))
+            }
         }
         Err(anyhow!(
             "invalid keypair argument, neither a valid key or path"
@@ -308,6 +318,7 @@ impl P2PArgs {
             gossipsub_config,
             heartbeat_config,
             set_request_timeout: Duration::from_secs(self.request_timeout),
+            max_concurrent_streams: self.max_concurrent_streams,
             set_connection_keep_alive: Duration::from_secs(self.connection_keep_alive),
             heartbeat_check_interval: Duration::from_secs(self.heartbeat_check_interval),
             heartbeat_max_avg_interval: Duration::from_secs(
@@ -322,5 +333,24 @@ impl P2PArgs {
             state: NotInitialized,
         };
         Ok(Some(config))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invalid_path() {
+        // Given
+        let invalid_path = "/invalid/path/to/keypair";
+        // When
+        let keypair = KeypairArg::try_from_string(invalid_path);
+
+        // Then
+        let err = keypair.expect_err("The path is incorrect it should fail");
+        assert!(err
+            .to_string()
+            .contains("does not exist for keypair argument"));
     }
 }

@@ -3,9 +3,12 @@ use crate::{
         database_description::relayer::Relayer,
         Database,
     },
-    service::sub_services::{
-        BlockProducerService,
-        TxPoolSharedState,
+    service::{
+        sub_services::{
+            BlockProducerService,
+            TxPoolSharedState,
+        },
+        vm_pool::MemoryPool,
     },
 };
 use fuel_core_consensus_module::{
@@ -35,6 +38,8 @@ pub mod relayer;
 #[cfg(feature = "p2p")]
 pub mod sync;
 pub mod txpool;
+
+pub mod fuel_gas_price_provider;
 
 #[derive(Debug, Clone)]
 pub struct ConsensusParametersProvider {
@@ -200,5 +205,18 @@ impl P2PAdapter {
 impl P2PAdapter {
     pub fn new() -> Self {
         Default::default()
+    }
+}
+
+#[derive(Clone)]
+pub struct SharedMemoryPool {
+    memory_pool: MemoryPool,
+}
+
+impl SharedMemoryPool {
+    pub fn new(number_of_instances: usize) -> Self {
+        Self {
+            memory_pool: MemoryPool::new(number_of_instances),
+        }
     }
 }

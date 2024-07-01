@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)] // for cfg(coverage)
+
 use fuel_core::{
     combined_database::CombinedDatabase,
     service::{
@@ -9,6 +11,7 @@ use fuel_core_client::client::{
     types::TransactionStatus,
     FuelClient,
 };
+use fuel_core_storage::transactional::AtomicView;
 use fuel_core_types::{
     blockchain::consensus::Consensus,
     fuel_crypto::SecretKey,
@@ -46,9 +49,10 @@ async fn can_get_sealed_block_from_poa_produced_block() {
         }
     };
 
+    let view = db.on_chain().latest_view().unwrap();
+
     // check sealed block header is correct
-    let sealed_block_header = db
-        .on_chain()
+    let sealed_block_header = view
         .get_sealed_block_header(&block_height)
         .unwrap()
         .expect("expected sealed header to be available");
@@ -65,8 +69,7 @@ async fn can_get_sealed_block_from_poa_produced_block() {
         .expect("failed to verify signature");
 
     // check sealed block is correct
-    let sealed_block = db
-        .on_chain()
+    let sealed_block = view
         .get_sealed_block_by_height(block_height)
         .unwrap()
         .expect("expected sealed header to be available");
@@ -83,6 +86,7 @@ async fn can_get_sealed_block_from_poa_produced_block() {
 }
 
 #[cfg(feature = "p2p")]
+#[cfg(not(coverage))] // too slow for coverage
 mod p2p {
     use super::*;
     use fuel_core::{

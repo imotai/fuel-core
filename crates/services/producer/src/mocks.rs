@@ -95,23 +95,6 @@ impl TxPool for MockTxPool {
 #[derive(Default)]
 pub struct MockExecutor(pub MockDb);
 
-#[derive(Debug)]
-struct DatabaseTransaction {
-    database: MockDb,
-}
-
-impl AsMut<MockDb> for DatabaseTransaction {
-    fn as_mut(&mut self) -> &mut MockDb {
-        &mut self.database
-    }
-}
-
-impl AsRef<MockDb> for DatabaseTransaction {
-    fn as_ref(&self) -> &MockDb {
-        &self.database
-    }
-}
-
 impl AsMut<MockDb> for MockDb {
     fn as_mut(&mut self) -> &mut MockDb {
         self
@@ -230,26 +213,20 @@ pub struct MockDb {
 }
 
 impl AtomicView for MockDb {
-    type View = Self;
+    type LatestView = Self;
 
-    type Height = BlockHeight;
+    fn latest_view(&self) -> StorageResult<Self::LatestView> {
+        Ok(self.clone())
+    }
+}
 
+impl BlockProducerDatabase for MockDb {
     fn latest_height(&self) -> Option<BlockHeight> {
         let blocks = self.blocks.lock().unwrap();
 
         blocks.keys().max().cloned()
     }
 
-    fn view_at(&self, _: &BlockHeight) -> StorageResult<Self::View> {
-        Ok(self.latest_view())
-    }
-
-    fn latest_view(&self) -> Self::View {
-        self.clone()
-    }
-}
-
-impl BlockProducerDatabase for MockDb {
     fn get_block(&self, height: &BlockHeight) -> StorageResult<Cow<CompressedBlock>> {
         let blocks = self.blocks.lock().unwrap();
         blocks

@@ -105,7 +105,10 @@ mod tests {
                 CheckError,
                 EstimatePredicates,
             },
-            interpreter::ExecutableTransaction,
+            interpreter::{
+                ExecutableTransaction,
+                MemoryInstance,
+            },
             script_with_data_offset,
             util::test_helpers::TestBuilder as TxBuilder,
             Call,
@@ -159,19 +162,10 @@ mod tests {
     }
 
     impl AtomicView for DisabledRelayer {
-        type View = Self;
-        type Height = DaBlockHeight;
+        type LatestView = Self;
 
-        fn latest_height(&self) -> Option<Self::Height> {
-            Some(0u64.into())
-        }
-
-        fn view_at(&self, _: &Self::Height) -> StorageResult<Self::View> {
-            Ok(self.latest_view())
-        }
-
-        fn latest_view(&self) -> Self::View {
-            self.clone()
+        fn latest_view(&self) -> StorageResult<Self::LatestView> {
+            Ok(self.clone())
         }
     }
 
@@ -505,6 +499,7 @@ mod tests {
             } = producer
                 .storage_view_provider
                 .latest_view()
+                .unwrap()
                 .contract_balances(recipient, None, IterDirection::Forward)
                 .next()
                 .unwrap()
@@ -595,6 +590,7 @@ mod tests {
             } = producer
                 .storage_view_provider
                 .latest_view()
+                .unwrap()
                 .contract_balances(recipient, None, IterDirection::Forward)
                 .next()
                 .unwrap()
@@ -704,6 +700,7 @@ mod tests {
             } = validator
                 .storage_view_provider
                 .latest_view()
+                .unwrap()
                 .contract_balances(recipient, None, IterDirection::Forward)
                 .next()
                 .unwrap()
@@ -2300,7 +2297,7 @@ mod tests {
         };
 
         let mut exec = make_executor(&messages);
-        let view = exec.storage_view_provider.latest_view();
+        let view = exec.storage_view_provider.latest_view().unwrap();
         assert!(view.message_exists(message_coin.nonce()).unwrap());
         assert!(view.message_exists(message_data.nonce()).unwrap());
 
@@ -2311,7 +2308,7 @@ mod tests {
         assert_eq!(skipped_transactions.len(), 0);
 
         // Successful execution consumes `message_coin` and `message_data`.
-        let view = exec.storage_view_provider.latest_view();
+        let view = exec.storage_view_provider.latest_view().unwrap();
         assert!(!view.message_exists(message_coin.nonce()).unwrap());
         assert!(!view.message_exists(message_data.nonce()).unwrap());
         assert_eq!(
@@ -2347,7 +2344,7 @@ mod tests {
         };
 
         let mut exec = make_executor(&messages);
-        let view = exec.storage_view_provider.latest_view();
+        let view = exec.storage_view_provider.latest_view().unwrap();
         assert!(view.message_exists(message_coin.nonce()).unwrap());
         assert!(view.message_exists(message_data.nonce()).unwrap());
 
@@ -2358,7 +2355,7 @@ mod tests {
         assert_eq!(skipped_transactions.len(), 0);
 
         // We should spend only `message_coin`. The `message_data` should be unspent.
-        let view = exec.storage_view_provider.latest_view();
+        let view = exec.storage_view_provider.latest_view().unwrap();
         assert!(!view.message_exists(message_coin.nonce()).unwrap());
         assert!(view.message_exists(message_data.nonce()).unwrap());
         assert_eq!(*view.coin(&UtxoId::new(tx_id, 0)).unwrap().amount(), amount);
@@ -2686,8 +2683,11 @@ mod tests {
             asset_id: Default::default(),
         })
         .finalize();
-        tx.estimate_predicates(&consensus_parameters.clone().into())
-            .unwrap();
+        tx.estimate_predicates(
+            &consensus_parameters.clone().into(),
+            MemoryInstance::new(),
+        )
+        .unwrap();
         let db = &mut Database::default();
 
         // insert coin into state
